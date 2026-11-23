@@ -1,0 +1,78 @@
+name: Diagnose build
+
+# Temporary: captures the real build error and publishes it to the ci-logs
+# branch, because workflow logs need admin rights to download. Delete after use.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "23.7.0"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Install Pebble SDK system dependencies
+        run: sudo apt-get install -y libsdl1.2debian libfdt1 libsdl2-2.0-0 libpixman-1-0
+
+      - uses: astral-sh/setup-uv@v5
+
+      - run: uv tool install pebble-tool==5.0.38 --python 3.13
+
+      - run: echo "$HOME/.local/share/uv/tools/pebble-tool/bin" >> $GITHUB_PATH
+
+      - run: pebble sdk install 4.9.169 && pebble sdk activate 4.9.169
+
+      - name: Environment
+        run: |
+          {
+            echo "node: $(node --version)"
+            echo "npm: $(npm --version)"
+            echo "pebble: $(pebble --version 2>&1)"
+            echo "sdk list: $(pebble sdk list 2>&1)"
+            echo "package version: $(node -p "require('./package.json').version")"
+            echo "messageKeys: $(node -p "Object.keys(require('./package.json').pebble.messageKeys).length")"
+            echo "git head: $(git rev-parse HEAD)"
+          } > environment.log 2>&1
+
+      - name: Build JS bundle
+        run: |
+          npm run build > js-build.log 2>&1
+          echo "EXIT=$?" >> js-build.log
+        continue-on-error: true
+
+      - name: Pebble build
+        run: |
+          pebble build > pebble-build.log 2>&1
+          echo "EXIT=$?" >> pebble-build.log
+        continue-on-error: true
+
+      - name: Show logs in the job output
+        run: |
+          echo "===== environment.log ====="; cat environment.log
+          echo "===== js-build.log ====="; tail -50 js-build.log
+          echo "===== pebble-build.log ====="; tail -80 pebble-build.log
+
+      - name: Publish logs to ci-logs branch
+        if: always()
+        run: |
+          set -e
+          mkdir -p /tmp/logs
+          cp -f environment.log js-build.log pebble-build.log /tmp/logs/ 2>/dev/null || true
+          cd /tmp/logs
+          git init -q
+          git checkout -q -b ci-logs
+          git add -A
+          git -c user.name="ci" -c user.email="ci@local" commit -qm "ci diagnostics for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ci-logs
