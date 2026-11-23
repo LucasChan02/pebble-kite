@@ -1,13 +1,13 @@
+import { availableSections, additionalFeeds } from "./types";
+import { CLEAR_CACHE_OPTIONS } from "./config";
+
 /**
  * Build the Clay configuration array.
  * @param categories - The list of category names to show as checkbox options
  */
 export function buildClayConfig(categories: string[] = []) {
   return [
-    {
-      type: "heading",
-      defaultValue: "Settings",
-    },
+    { type: "heading", defaultValue: "Settings" },
     {
       type: "section",
       items: [
@@ -24,40 +24,8 @@ export function buildClayConfig(categories: string[] = []) {
           type: "checkboxgroup",
           messageKey: "UserSections",
           label: "Article Sections",
-          defaultValue: [
-            true, // Highlights
-            true, // Quote
-            true, // Perspectives
-            true, // Historical Background
-            true, // Humanitarian Impact
-            true, // Technical Details
-            true, // Scientific Significance
-            true, // Travel Advisory
-            true, // Performance Statistics
-            true, // Industry Impact
-            true, // Timeline
-            true, // International Reactions
-            true, // Quick Questions
-            true, // Action Items
-            true, // Did You Know?
-          ],
-          options: [
-            "Highlights",
-            "Quote",
-            "Perspectives",
-            "Historical Background",
-            "Humanitarian Impact",
-            "Technical Details",
-            "Scientific Significance",
-            "Travel Advisory",
-            "Performance Statistics",
-            "Industry Impact",
-            "Timeline",
-            "International Reactions",
-            "Quick Questions",
-            "Action Items",
-            "Did You Know?",
-          ],
+          defaultValue: availableSections.map(() => true),
+          options: [...availableSections],
         },
         {
           type: "toggle",
@@ -71,10 +39,10 @@ export function buildClayConfig(categories: string[] = []) {
           type: "checkboxgroup",
           messageKey: "AdditionalFeeds",
           label: "Additional Feeds",
-          defaultValue: [false],
+          defaultValue: additionalFeeds.map(() => false),
           description:
             "Feeds that are separate from News Feed within the Kagiverse. May not be localized in all languages. May be out of sync with the main news feed.",
-          options: ["Small Web"],
+          options: [...additionalFeeds],
         },
         {
           type: "select",
@@ -145,7 +113,7 @@ export function buildClayConfig(categories: string[] = []) {
           type: "select",
           messageKey: "UserTextSize",
           label: "Text Size",
-          defaultValue: "",
+          defaultValue: "0",
           options: [
             { label: "Default (Follow Notification Size)", value: "0" },
             { label: "Small", value: "1" },
@@ -165,10 +133,7 @@ export function buildClayConfig(categories: string[] = []) {
     {
       type: "section",
       items: [
-        {
-          type: "heading",
-          defaultValue: "Developer",
-        },
+        { type: "heading", defaultValue: "Developer" },
         {
           type: "toggle",
           messageKey: "DebugMode",
@@ -180,19 +145,11 @@ export function buildClayConfig(categories: string[] = []) {
           type: "checkboxgroup",
           messageKey: "ClearCacheOnSave",
           label: "Clear Cache On Save",
-          defaultValue: [false, false, false, false],
-          options: [
-            "Clear full cache",
-            "Clear timeline pin memory",
-            "Clear read stories memory",
-            "Clear network cache",
-          ],
+          defaultValue: CLEAR_CACHE_OPTIONS.map(() => false),
+          options: [...CLEAR_CACHE_OPTIONS],
         },
       ],
     },
-    {
-      type: "submit",
-      defaultValue: "Save",
-    },
+    { type: "submit", defaultValue: "Save" },
   ];
 }

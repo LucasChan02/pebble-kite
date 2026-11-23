@@ -108,18 +108,13 @@ export const availableSections = [
 
 export type AvailableSection = (typeof availableSections)[number];
 
-export const defaultSections: Partial<AvailableSection>[] = [
-  ...availableSections,
-];
+export const defaultSections: AvailableSection[] = [...availableSections];
 
 export const additionalFeeds = ["Small Web"] as const;
 
 export type AdditionalFeature = (typeof additionalFeeds)[number];
 
 export const defaultMaxStories = 12;
-
-// Categories to exclude when setting available categories from Kagi News API
-const EXCLUDED_CATEGORIES = ["OnThisDay"];
 
 export const availableCategories: AvailableCategory[] = [...defaultCategories];
 
@@ -131,18 +126,8 @@ export const setAvailableCategories = (
   categories: AvailableCategory[],
   displayNames?: Map<string, Record<string, string>>,
 ) => {
-  const filtered = categories.filter(
-    (category) => !EXCLUDED_CATEGORIES.includes(category),
-  );
-  availableCategories.length = 0;
-  availableCategories.push(...filtered);
+  availableCategories.splice(0, availableCategories.length, ...categories);
 
   categoryDisplayNames.clear();
-  if (displayNames) {
-    for (const [name, names] of displayNames) {
-      if (!EXCLUDED_CATEGORIES.includes(name)) {
-        categoryDisplayNames.set(name, names);
-      }
-    }
-  }
+  displayNames?.forEach((names, name) => categoryDisplayNames.set(name, names));
 };

@@ -11,12 +11,14 @@ import type {
 } from "./types";
 import type { BatchCategory } from "./server/type/BatchCategory";
 import { CONCURRENT_BATCH_SIZE } from "./types";
-import { getAdditionalFeeds } from "./handlers";
 import {
   smallWebFeedRequest,
   SmallWebFeedResponse,
 } from "./server/request/contentRequests";
 import { tensionRequest } from "./server/request/contentRequests";
+import { createLogger } from "../lib";
+
+const log = createLogger("KNJSApi");
 
 let categoryBatchMap: CurrentData = {
   batchId: "",
@@ -241,10 +243,12 @@ const sortData = (data: CurrentData) => {
 export const updateCategories = async ({
   selectedCategoryNames,
   maxStoryCount,
+  additionalFeeds = [],
   onProgress,
 }: {
   selectedCategoryNames: string[];
   maxStoryCount: number;
+  additionalFeeds?: readonly string[];
   onProgress?: (completedGroups: number, totalGroups: number) => void;
 }) => {
   const categoriesResponse = await batchCategoriesRequest({
@@ -260,7 +264,7 @@ export const updateCategories = async ({
       ),
     };
   }
-  if (getAdditionalFeeds().includes("Small Web")) {
+  if (additionalFeeds.includes("Small Web")) {
     filtered.categories.push({
       id: "smallWebFeed",
       categoryName: "Small Web",
@@ -281,16 +285,27 @@ export const updateCategories = async ({
 
   for (let j = 0; j < filtered.categories.length; j += CONCURRENT_BATCH_SIZE) {
     const catGroup = filtered.categories.slice(j, j + CONCURRENT_BATCH_SIZE);
+    // Isolate failures per category: one unreachable or empty category must not
+    // cost the user every other category, and must not reject updateCategories
+    // (which would leave the watch stuck on the splash screen).
     await Promise.all(
       catGroup.map(async (category: BatchCategory) => {
-        const stories = await updateStories({
-          categoryId: category.id,
-          maxStoryCount,
-        });
-        categorizedStories.push({
-          category: { id: category.id, name: category.categoryName },
-          stories,
-        });
+        try {
+          const stories = await updateStories({
+            categoryId: category.id,
+            maxStoryCount,
+          });
+          if (stories.length === 0) return;
+          categorizedStories.push({
+            category: { id: category.id, name: category.categoryName },
+            stories,
+          });
+        } catch (err) {
+          log.warn(
+            `Skipping category "${category.categoryName}"`,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
       }),
     );
 

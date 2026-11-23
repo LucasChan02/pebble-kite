@@ -16,6 +16,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A release only happens on an exact "Bump version X.Y.Z" commit. Every
+      # other push (including test builds such as 1.27.2-test.1) still builds
+      # and publishes an artifact, it just never tags or releases.
       - name: Check for version bump commit
         id: version
         run: |
@@ -28,37 +31,36 @@ jobs:
           fi
 
       - name: Read version files
-        if: steps.version.outputs.should_release == 'true'
         id: tool_versions
         run: |
           NODEJS_VERSION=$(grep '^nodejs' .tool-versions | awk '{print $2}')
           PEBBLE_TOOL_VERSION=$(grep '^tool' .pebble-versions | awk '{print $2}')
           PEBBLE_SDK_VERSION=$(grep '^sdk' .pebble-versions | awk '{print $2}')
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
           echo "nodejs=$NODEJS_VERSION" >> "$GITHUB_OUTPUT"
           echo "pebble_tool=$PEBBLE_TOOL_VERSION" >> "$GITHUB_OUTPUT"
           echo "pebble_sdk=$PEBBLE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+          echo "package=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
-        if: steps.version.outputs.should_release == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ steps.tool_versions.outputs.nodejs }}
           cache: "npm"
 
       - name: Install npm dependencies
-        if: steps.version.outputs.should_release == 'true'
         run: npm ci
 
+      - name: Typecheck
+        run: npx tsc --noEmit
+
       - name: Install Pebble SDK system dependencies
-        if: steps.version.outputs.should_release == 'true'
         run: sudo apt-get install -y libsdl1.2debian libfdt1 libsdl2-2.0-0 libpixman-1-0
 
       - name: Install uv
-        if: steps.version.outputs.should_release == 'true'
         uses: astral-sh/setup-uv@v5
 
       - name: Cache pebble-tool
-        if: steps.version.outputs.should_release == 'true'
         id: cache_pebble_tool
         uses: actions/cache@v4
         with:
@@ -66,20 +68,31 @@ jobs:
           key: pebble-tool-${{ steps.tool_versions.outputs.pebble_tool }}
 
       - name: Install pebble-tool
-        if: steps.version.outputs.should_release == 'true'
         run: uv tool install pebble-tool==${{ steps.tool_versions.outputs.pebble_tool }} --python 3.13
 
       - name: Add pebble-tool to PATH
-        if: steps.version.outputs.should_release == 'true'
         run: echo "$HOME/.local/share/uv/tools/pebble-tool/bin" >> $GITHUB_PATH
 
       - name: Install Pebble SDK
-        if: steps.version.outputs.should_release == 'true'
         run: pebble sdk install ${{ steps.tool_versions.outputs.pebble_sdk }} && pebble sdk activate ${{ steps.tool_versions.outputs.pebble_sdk }}
 
       - name: Build
-        if: steps.version.outputs.should_release == 'true'
         run: pebble build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kagi-news-${{ steps.tool_versions.outputs.package }}
+          path: build/*.pbw
+          if-no-files-found: error
+
+      - name: Verify package version matches the bump
+        if: steps.version.outputs.should_release == 'true'
+        run: |
+          if [[ "${{ steps.tool_versions.outputs.package }}" != "${{ steps.version.outputs.version }}" ]]; then
+            echo "package.json says ${{ steps.tool_versions.outputs.package }} but the commit says ${{ steps.version.outputs.version }}"
+            exit 1
+          fi
 
       - name: Generate release notes
         if: steps.version.outputs.should_release == 'true'
@@ -90,7 +103,7 @@ jobs:
             | sed -n '2p' \
             | awk '{print $1}')
 
-          if [ -z "$PREV_BUMP" ]; then 
+          if [ -z "$PREV_BUMP" ]; then
             NOTES=$(git log --pretty=format:"- %s" | grep -vE "^- Bump version [0-9]+\.[0-9]+\.[0-9]+$")
           else
             NOTES=$(git log --pretty=format:"- %s" "${PREV_BUMP}..HEAD" | grep -vE "^- Bump version [0-9]+\.[0-9]+\.[0-9]+$")

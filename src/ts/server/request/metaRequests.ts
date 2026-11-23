@@ -34,33 +34,43 @@ export type PossibleCategoriesResult = {
   displayNamesMap: Map<string, Record<string, string>>;
 };
 
+// Categories that exist in the API but carry no news stories. Matched on
+// categoryId because that is stable while displayName is translated.
+const EXCLUDED_CATEGORY_IDS = new Set(["onthisday"]);
+
+const metadataUrl = "https://news.kagi.com/api/categories/metadata";
+
 export const possibleCategoriesRequest =
   async (): Promise<PossibleCategoriesResult> =>
-    cacheFirstFetchJSON<CategoryMetadataResponse>(
-      `https://news.kagi.com/api/categories/metadata`,
-    ).then((response) => {
-      const displayNamesMap = new Map<string, Record<string, string>>();
-      const names: string[] = [];
+    cacheFirstFetchJSON<CategoryMetadataResponse>(metadataUrl).then(
+      (response) => {
+        const displayNamesMap = new Map<string, Record<string, string>>();
+        const names: string[] = [];
 
-      for (const category of response.categories) {
-        // Normalize encoding and remove zero-width characters to prevent issues with Clay checkboxes
-        const name = normalizeCategoryName(category.displayName);
-
-        names.push(name);
-
-        if (category.displayNames) {
-          // Normalize all display name values
-          const normalized: Record<string, string> = {};
-          for (const [lang, value] of Object.entries(category.displayNames)) {
-            normalized[lang] = normalizeCategoryName(value);
+        for (const category of response.categories) {
+          if (EXCLUDED_CATEGORY_IDS.has(category.categoryId.toLowerCase())) {
+            continue;
           }
-          displayNamesMap.set(name, normalized);
-        }
-      }
 
-      names.sort();
-      return { names, displayNamesMap };
-    });
+          // Normalize encoding and remove zero-width characters to prevent
+          // issues with Clay checkboxes.
+          const name = normalizeCategoryName(category.displayName);
+          if (names.includes(name)) continue;
+          names.push(name);
+
+          if (category.displayNames) {
+            const normalized: Record<string, string> = {};
+            for (const [lang, value] of Object.entries(category.displayNames)) {
+              normalized[lang] = normalizeCategoryName(value);
+            }
+            displayNamesMap.set(name, normalized);
+          }
+        }
+
+        names.sort();
+        return { names, displayNamesMap };
+      },
+    );
 
 type CategoriesMetadataResponse = {
   categories: CategoryMetadata[];

@@ -1,13 +1,13 @@
 import {
+  AdditionalFeature,
   AvailableCategory,
   AvailableSection,
-  AdditionalFeature,
+  additionalFeeds,
   availableCategories,
   availableSections,
   defaultCategories,
   defaultMaxStories,
   defaultSections,
-  additionalFeeds,
 } from "./types";
 import { createLogger } from "../lib/logger";
 
@@ -51,8 +51,104 @@ const CONFIG_DEFAULTS: AppConfig = {
 
 const CONFIG_KEY = "kagi_news_config";
 
+/** The "Clear Cache On Save" checkboxes, in Clay option order. */
+export const CLEAR_CACHE_OPTIONS = [
+  "Clear full cache",
+  "Clear timeline pin memory",
+  "Clear read stories memory",
+  "Clear network cache",
+] as const;
+
+export type ClearCacheOption = (typeof CLEAR_CACHE_OPTIONS)[number];
+
+/**
+ * A Clay config page response as returned by `clay.getSettings(response, false)`.
+ * Keyed by messageKey *name* and wrapped in `{ value }`, which keeps the config
+ * independent of the numeric AppMessage key layout in package.json.
+ */
+export type ClaySettings = Record<string, { value?: unknown } | undefined>;
+
+const readValue = <T>(settings: ClaySettings, key: string, fallback: T): T => {
+  const value = settings[key]?.value;
+  return (value === undefined || value === null ? fallback : value) as T;
+};
+
+// A missing key means the control was never rendered, so keep the built-in
+// default. A key that is present but empty means the user cleared every box.
+const readFlags = <T extends string>(
+  settings: ClaySettings,
+  key: string,
+  options: readonly T[],
+  fallback: readonly T[] = [],
+): T[] => {
+  const entry = settings[key];
+  if (entry === undefined) return [...fallback];
+  const flags = Array.isArray(entry.value) ? entry.value : [];
+  return options.filter((_, index) => Boolean(flags[index]));
+};
+
+const toBoundedInt = (
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+): number => {
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed)
+    ? Math.min(max, Math.max(min, parsed))
+    : fallback;
+};
+
+/** Convert a Clay config page response into an AppConfig. */
+export const parseClayConfig = (settings: ClaySettings): AppConfig => ({
+  selectedCategoryNames: readFlags(
+    settings,
+    "UserCategories",
+    availableCategories,
+    defaultCategories,
+  ),
+  selectedSectionNames: readFlags(
+    settings,
+    "UserSections",
+    availableSections,
+    availableSections,
+  ),
+  selectedAdditionalFeeds: readFlags(
+    settings,
+    "AdditionalFeeds",
+    additionalFeeds,
+  ),
+  newsRefreshPinSetting: Boolean(
+    readValue<boolean[]>(settings, "UserTimelinePins", [])[0],
+  ),
+  selectedTextSize: toBoundedInt(
+    readValue(settings, "UserTextSize", 0),
+    0,
+    3,
+    0,
+  ),
+  selectedInterfaceLanguage: String(
+    readValue(settings, "UserInterfaceLanguage", "") ?? "",
+  ),
+  selectedContentLanguage: String(
+    readValue(settings, "UserContentLanguage", "") ?? "",
+  ),
+  selectedMaxStoryCount: toBoundedInt(
+    readValue(settings, "UserMaxStories", defaultMaxStories),
+    1,
+    50,
+    defaultMaxStories,
+  ),
+  isTensionIndexEnabled: Boolean(readValue(settings, "ShowTensionIndex", true)),
+});
+
+/** The "Clear Cache On Save" options that were ticked. */
+export const parseClearCacheFlags = (
+  settings: ClaySettings,
+): ClearCacheOption[] =>
+  readFlags(settings, "ClearCacheOnSave", CLEAR_CACHE_OPTIONS);
+
 // Legacy per-key storage used before the config was unified into a single blob.
-// Property names match the old CONFIG_KEYS entries, which were identical to the property names.
 const LEGACY_KEYS: (keyof AppConfig)[] = [
   "selectedAdditionalFeeds",
   "newsRefreshPinSetting",
@@ -67,18 +163,15 @@ const LEGACY_KEYS: (keyof AppConfig)[] = [
 
 const migrateFromLegacyStorage = (): AppConfig => {
   const migrated: Partial<AppConfig> = {};
-  let didMigrate = false;
   for (const key of LEGACY_KEYS) {
     const raw = localStorage.getItem(key);
-    if (raw) {
-      try {
-        (migrated as any)[key] = JSON.parse(raw);
-        didMigrate = true;
-      } catch {}
-    }
+    if (!raw) continue;
+    try {
+      (migrated as Record<string, unknown>)[key] = JSON.parse(raw);
+    } catch {}
   }
   const config = { ...CONFIG_DEFAULTS, ...migrated };
-  if (didMigrate) {
+  if (Object.keys(migrated).length > 0) {
     localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
     LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
     log.info("Migrated config from per-key storage to single blob");
@@ -89,11 +182,10 @@ const migrateFromLegacyStorage = (): AppConfig => {
 export const getAppConfig = (): AppConfig => {
   try {
     const stored = localStorage.getItem(CONFIG_KEY);
-    if (stored) {
-      // Merge with defaults to handle new keys added in future versions
-      return { ...CONFIG_DEFAULTS, ...JSON.parse(stored) };
-    }
-    return migrateFromLegacyStorage();
+    // Merge with defaults so keys added in later versions still resolve.
+    return stored
+      ? { ...CONFIG_DEFAULTS, ...JSON.parse(stored) }
+      : migrateFromLegacyStorage();
   } catch (err) {
     log.warn(
       "Failed to read config, using defaults",
@@ -103,10 +195,6 @@ export const getAppConfig = (): AppConfig => {
   }
 };
 
-/**
- * Save a configuration to localStorage
- * @param config The configuration to save
- */
 export const saveAppConfig = (config: AppConfig): void => {
   try {
     localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
@@ -120,90 +208,30 @@ export const saveAppConfig = (config: AppConfig): void => {
 };
 
 /**
- * Convert category names to boolean array for Clay
- * @param categoryNames The category names to convert (if not provided, uses stored config)
- * @returns Boolean array representing selected categories
- */
-export const categoriesToBoolean = (
-  categoryNames?: AvailableCategory[],
-): boolean[] => {
-  const names = categoryNames ?? getAppConfig().selectedCategoryNames;
-  return availableCategories.map((cat) => names.includes(cat));
-};
-
-/**
- * Convert section names to boolean array for Clay
- * @param sectionNames The section names to convert (if not provided, uses stored config)
- * @returns Boolean array representing selected sections
- */
-export const sectionsToBoolean = (
-  sectionNames?: AvailableSection[],
-): boolean[] => {
-  const names = sectionNames ?? getAppConfig().selectedSectionNames;
-  return availableSections.map((sec) => names.includes(sec));
-};
-
-/**
- * Convert additional feature names to boolean array for Clay
- * @param featureNames The feature names to convert (if not provided, uses stored config)
- * @returns Boolean array representing selected additional feeds
- */
-export const feedsToBoolean = (
-  featureNames?: AdditionalFeature[],
-): boolean[] => {
-  const names = featureNames ?? getAppConfig().selectedAdditionalFeeds;
-  return additionalFeeds.map((feat) => names.includes(feat));
-};
-
-/**
- * Convert boolean array to category names
- * @param booleans The boolean array to convert
- * @returns The selected category names
- */
-export const booleanToCategories = (
-  booleans: boolean[],
-): AvailableCategory[] => {
-  return availableCategories.filter((_, i) => booleans[i]);
-};
-
-/**
- * Convert boolean array to section names
- * @param booleans The boolean array to convert
- * @returns The selected section names
- */
-export const booleanToSections = (booleans: boolean[]): AvailableSection[] => {
-  return availableSections.filter((_, i) => booleans[i]);
-};
-
-/**
- * Convert boolean array to additional feature names
- * @param booleans The boolean array to convert
- * @returns The selected additional feature names
- */
-export const booleanToFeeds = (booleans: boolean[]): AdditionalFeature[] => {
-  return additionalFeeds.filter((_, i) => booleans[i]);
-};
-
-/**
- * Generate Clay settings object from stored configuration
+ * Defaults handed to the Clay config page via `localStorage["clay-settings"]`.
  * @param debugMode Whether debug mode is enabled
- * @returns Clay settings object
  */
 export const generateClaySettings = (
   debugMode: boolean,
-): Record<string, any> => {
+): Record<string, unknown> => {
   const config = getAppConfig();
 
   return {
-    UserCategories: categoriesToBoolean(config.selectedCategoryNames),
-    UserSections: sectionsToBoolean(config.selectedSectionNames),
-    AdditionalFeeds: feedsToBoolean(config.selectedAdditionalFeeds),
+    UserCategories: availableCategories.map((name) =>
+      config.selectedCategoryNames.includes(name),
+    ),
+    UserSections: availableSections.map((name) =>
+      config.selectedSectionNames.includes(name),
+    ),
+    AdditionalFeeds: additionalFeeds.map((name) =>
+      config.selectedAdditionalFeeds.includes(name),
+    ),
     UserInterfaceLanguage: config.selectedInterfaceLanguage,
     UserContentLanguage: config.selectedContentLanguage,
     UserMaxStories: config.selectedMaxStoryCount,
-    UserTextSize: config.selectedTextSize,
+    UserTextSize: String(config.selectedTextSize),
     UserTimelinePins: [config.newsRefreshPinSetting],
-    ClearCacheOnSave: [false, false, false, false], // Always default to false on load
+    ClearCacheOnSave: CLEAR_CACHE_OPTIONS.map(() => false),
     DebugMode: debugMode,
     ShowTensionIndex: config.isTensionIndexEnabled,
   };

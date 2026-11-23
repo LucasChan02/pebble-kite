@@ -31,10 +31,14 @@ export interface Clay {
   generateUrl(): string;
 
   /**
-   * Parse response from the webview and return a plain settings object.
-   * Example: { UseCategoryFilter: true, SelectedCategories: 'World,Science' }
+   * Parse the response from the webview.
+   *
+   * With `convert` left at its default Clay flattens each setting onto its
+   * numeric AppMessage key (`messageKey + optionIndex` for checkbox groups).
+   * Passing `false` returns the settings keyed by messageKey *name* with
+   * `{ value }` wrappers, which is independent of the numeric key layout.
    */
-  getSettings(response: string): { [key: string]: any };
+  getSettings(response: string, convert?: boolean): { [key: string]: any };
 
   [propName: string]: any;
 }

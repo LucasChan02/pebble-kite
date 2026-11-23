@@ -42,10 +42,6 @@ export const setSelectedCategories = (selected: AvailableCategory[]) => {
   selectedCategoryNames = selected;
 };
 
-export const setSelectedCategoriesFromBoolean = (selected: boolean[]) => {
-  selectedCategoryNames = availableCategories.filter((_, i) => selected[i]);
-};
-
 export const getSelectedCategoryNames = ({
   includeAdditionalFeeds = false,
 } = {}) => {
@@ -57,10 +53,6 @@ export const getSelectedCategoryNames = ({
 
 export const setSelectedSections = (selected: AvailableSection[]) => {
   selectedSectionNames = selected;
-};
-
-export const setSelectedSectionsFromBoolean = (selected: boolean[]) => {
-  selectedSectionNames = availableSections.filter((_, i) => selected[i]);
 };
 
 export const getSelectedSectionNames = () => selectedSectionNames;
@@ -672,6 +664,7 @@ export const handleUpdateCategories = async (
   await updateCategories({
     selectedCategoryNames,
     maxStoryCount: selectedMaxStoryCount,
+    additionalFeeds,
     onProgress,
   });
 };

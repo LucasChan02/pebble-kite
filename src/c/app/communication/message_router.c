@@ -1,7 +1,10 @@
 #include "message_router.h"
 #include "../utils/debug_logger.h"
 
-#define MAX_HANDLERS 15
+// Keep a few slots of headroom: registering more handlers than this used to
+// drop the last-registered type silently, which is how tension_index_update
+// stopped reaching the watch.
+#define MAX_HANDLERS 24
 
 typedef struct
 {

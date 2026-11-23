@@ -1,6 +1,6 @@
 import { createLogger } from "../../lib";
 import { fetchJSON, fetchText } from "./fetchUtils";
-import * as packageJson from "../../../package-lock.json";
+import * as packageJson from "../../../package.json";
 
 export interface CacheEntry<T> {
   appVersion: string;

@@ -4,12 +4,14 @@ import { buildClayConfig } from "./clayConfig";
 const Clay: ClayConstructor = require("@rebble/clay");
 
 import {
-  getAppConfig,
-  saveAppConfig,
-  booleanToCategories,
-  booleanToSections,
+  AppConfig,
+  ClaySettings,
+  ClearCacheOption,
   generateClaySettings,
-  booleanToFeeds,
+  getAppConfig,
+  parseClayConfig,
+  parseClearCacheFlags,
+  saveAppConfig,
 } from "./config";
 import {
   healthRequest,
@@ -19,12 +21,9 @@ import * as handlers from "./handlers";
 import {
   additionalFeeds,
   availableCategories,
-  setAvailableCategories,
-  availableSections,
   defaultCategories,
-  defaultSections,
+  setAvailableCategories,
   StoryDetailEnum,
-  AvailableCategory,
 } from "./types";
 import {
   createLogger,
@@ -49,6 +48,8 @@ import { getCategoryBatchMap } from "./api";
 
 const log = createLogger("KNJS");
 
+// The percentage sent is arbitrary based on what seems right for how long each
+// step takes, and is only meant to give a rough sense of progress.
 const LOADING_MILESTONES = {
   READY: 5,
   POSSIBLE_CATEGORIES: 15,
@@ -59,18 +60,17 @@ const LOADING_MILESTONES = {
   TENSION: 95,
 } as const;
 
-// The percentage sent is arbitrary based on what seems right for how long each step takes, and is only meant to give a rough sense of progress rather than be exact.
+// Only ever moves forwards, so the splash bar never jumps back.
 const sendStartupLoadingState = (() => {
   let lastSent = 0;
   return async (current: number) => {
-    if (current > lastSent) {
-      lastSent = current;
-      return sendAppMessageWithSession({
-        type: "loading_state",
-        loadingCurrent: current,
-        loadingMax: 100,
-      });
-    }
+    if (current <= lastSent) return;
+    lastSent = current;
+    return sendAppMessageWithSession({
+      type: "loading_state",
+      loadingCurrent: current,
+      loadingMax: 100,
+    });
   };
 })();
 
@@ -97,18 +97,105 @@ const refreshPossibleCategories = async (): Promise<void> => {
   });
 };
 
+const sendInterfaceStrings = async (
+  config: AppConfig,
+  categoryKeys: string[],
+): Promise<void> => {
+  const strings = flattenInterfaceStrings(
+    filterInterfaceStringOptionals({
+      strings: getInterfaceStrings(config.selectedInterfaceLanguage),
+      sectionKeys: config.selectedSectionNames,
+      categoryKeys,
+      featureKeys: config.selectedAdditionalFeeds,
+      lang: config.selectedInterfaceLanguage,
+    }),
+  );
+  await sendAppMessageWithSession({
+    type: "send_interface_strings",
+    interfaceStrings: JSON.stringify(strings),
+  });
+};
+
+// Push everything the watch needs before it can ask for categories.
+const applyConfig = async (config: AppConfig): Promise<void> => {
+  setServerLang(config.selectedContentLanguage);
+  handlers.setMaxStoryCount(config.selectedMaxStoryCount);
+  handlers.setSelectedSections(config.selectedSectionNames);
+  handlers.setSelectedCategories(config.selectedCategoryNames);
+  handlers.setAdditionalFeeds(...config.selectedAdditionalFeeds);
+
+  await sendAppMessageWithSession({
+    type: "set_text_size",
+    textSize: config.selectedTextSize,
+  });
+  await sendInterfaceStrings(config, config.selectedCategoryNames);
+};
+
+// Load stories, then tell the watch data is ready. update_categories is sent
+// even when the fetch fails so the watch can never be stranded on the splash
+// screen, which is what a rejected updateCategories used to cause.
+const loadCategoriesAndNotifyWatch = async (
+  config: AppConfig,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<void> => {
+  try {
+    await handlers.handleUpdateCategories(onProgress);
+  } catch (err) {
+    log.error(
+      "Failed to load categories",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // Re-send with only the categories that have stories today; empty categories
+  // (e.g. "Bitcoin" on a slow news day) would otherwise take a localization
+  // slot and shift every later category's display name by one position.
+  const actualCategoryNames = getCategoryBatchMap()
+    .categorizedStories.map((categorized) => categorized.category.name)
+    .filter((name) => !(additionalFeeds as readonly string[]).includes(name));
+
+  try {
+    await sendInterfaceStrings(config, actualCategoryNames);
+  } catch (err) {
+    log.warn("Failed to send interface strings", err);
+  }
+
+  await handlers
+    .updateTensionIndex(config.isTensionIndexEnabled)
+    .catch((err) => log.warn("Failed to update tension index", err));
+
+  log.info("Notifying watch that data is ready");
+  await sendAppMessageWithSession({
+    type: "update_categories",
+    state: "success",
+  });
+};
+
+// Drop cached network data whenever Clay closes so a settings change is never
+// served stale data, plus whatever the user asked to clear.
+const clearCachesOnSave = async (
+  selected: ClearCacheOption[],
+): Promise<void> => {
+  await handlers.clearNetworkCache({ repopulateBatchId: true });
+
+  if (selected.includes("Clear full cache")) {
+    await handlers.clearFullCache();
+    return;
+  }
+  if (selected.includes("Clear timeline pin memory")) handlers.clearPinCache();
+  if (selected.includes("Clear read stories memory")) {
+    handlers.clearReadStoriesCache();
+  }
+};
+
 Pebble.addEventListener("ready", async () => {
   setSessionId(Date.now().toString());
   initDebugMode();
   log.info("PebbleKit JS ready");
 
-  await sendAppMessageWithSession({
-    type: "provide_session_id",
-  });
-
+  await sendAppMessageWithSession({ type: "provide_session_id" });
   await sendStartupLoadingState(LOADING_MILESTONES.READY);
 
-  // Refresh possible categories from Kagi News API
   await refreshPossibleCategories();
   await sendStartupLoadingState(LOADING_MILESTONES.POSSIBLE_CATEGORIES);
 
@@ -119,104 +206,40 @@ Pebble.addEventListener("ready", async () => {
   await sendStartupLoadingState(LOADING_MILESTONES.DEBUG_MODE);
 
   try {
-    const response = await healthRequest();
-    if (response.health === true) {
-      log.info("Kagi News API is healthy");
-      const batchInfo = await batchesRequest();
-      log.info(
-        `Current batch ID: ${batchInfo.id}, created at ${batchInfo.createdAt}`,
-      );
-      updateCachedBatchInfo(batchInfo);
-      await sendStartupLoadingState(LOADING_MILESTONES.BATCH_INFO);
-
-      const {
-        newsRefreshPinSetting: newsRefreshPinEnabled,
-        selectedTextSize: textSize,
-        selectedContentLanguage: contentLanguage,
-        selectedMaxStoryCount: maxStoryCount,
-        selectedSectionNames,
-        selectedCategoryNames,
-        selectedAdditionalFeeds,
-        isTensionIndexEnabled: showTensionIndex,
-        selectedInterfaceLanguage: interfaceLanguage,
-      } = getAppConfig();
-
-      if (newsRefreshPinEnabled) {
-        timeline.pushNewsRefreshPinToTimeline();
-      }
-
-      await sendAppMessageWithSession({
-        type: "set_text_size",
-        textSize,
-      });
-
-      setServerLang(contentLanguage);
-
-      handlers.setMaxStoryCount(maxStoryCount);
-
-      handlers.setSelectedSections(selectedSectionNames);
-
-      handlers.setSelectedCategories(selectedCategoryNames);
-
-      handlers.setAdditionalFeeds(...selectedAdditionalFeeds);
-
-      await sendStartupLoadingState(LOADING_MILESTONES.CONFIG);
-
-      const sendInterfaceStrings = async (categoryKeys: string[]) => {
-        const strings = flattenInterfaceStrings(
-          filterInterfaceStringOptionals({
-            strings: getInterfaceStrings(interfaceLanguage),
-            sectionKeys: selectedSectionNames ?? defaultSections,
-            categoryKeys,
-            featureKeys: selectedAdditionalFeeds ?? defaultCategories,
-            lang: interfaceLanguage,
-          }),
-        );
-        log.debug("Sending interface strings:", JSON.stringify(strings));
-        await sendAppMessageWithSession({
-          type: "send_interface_strings",
-          interfaceStrings: JSON.stringify(strings),
-        });
-      };
-
-      await sendInterfaceStrings(selectedCategoryNames ?? defaultCategories);
-      await sendStartupLoadingState(LOADING_MILESTONES.INTERFACE_STRINGS);
-
-      // Categories must update first before tension. Both should be finished before notifying the watch
-      await handlers.handleUpdateCategories((completedGroups, totalGroups) => {
-        const categoryProgress =
-          LOADING_MILESTONES.INTERFACE_STRINGS +
-          Math.round(
-            (completedGroups / totalGroups) *
-              (LOADING_MILESTONES.TENSION -
-                LOADING_MILESTONES.INTERFACE_STRINGS),
-          );
-        void sendStartupLoadingState(categoryProgress);
-      });
-
-      // TODO: This should be cleaned up a lot. I don't like that I have to repeat the additionalFeeds removal here.
-      // Re-send with only categories that actually have stories today; empty categories
-      // (e.g. "Bitcoin" on a slow news day) would otherwise occupy a localization slot
-      // and shift every subsequent category's display name by one position on the watch.
-      // Additional feeds should be removed here
-      const actualCategoryNames = getCategoryBatchMap()
-        .categorizedStories.map((cs) => cs.category.name)
-        .filter(
-          (name) => !(additionalFeeds as readonly string[]).includes(name),
-        );
-      await sendInterfaceStrings(actualCategoryNames);
-
-      await handlers.updateTensionIndex(showTensionIndex);
-      await sendStartupLoadingState(LOADING_MILESTONES.TENSION);
-
-      log.info("Notifying watch that data is ready");
-      await sendAppMessageWithSession({
-        type: "update_categories",
-        state: "success",
-      });
-    } else {
+    const health = await healthRequest();
+    if (!health.health) {
       log.warn("Kagi News API is unhealthy");
+      return;
     }
+    log.info("Kagi News API is healthy");
+
+    const batchInfo = await batchesRequest();
+    log.info(
+      `Current batch ID: ${batchInfo.id}, created at ${batchInfo.createdAt}`,
+    );
+    updateCachedBatchInfo(batchInfo);
+    await sendStartupLoadingState(LOADING_MILESTONES.BATCH_INFO);
+
+    const config = getAppConfig();
+
+    if (config.newsRefreshPinSetting) {
+      timeline.pushNewsRefreshPinToTimeline();
+    }
+
+    await applyConfig(config);
+    await sendStartupLoadingState(LOADING_MILESTONES.INTERFACE_STRINGS);
+
+    // Categories must update before tension; both finish before the watch is told
+    await loadCategoriesAndNotifyWatch(config, (completed, total) => {
+      const progress =
+        LOADING_MILESTONES.INTERFACE_STRINGS +
+        Math.round(
+          (completed / total) *
+            (LOADING_MILESTONES.TENSION - LOADING_MILESTONES.INTERFACE_STRINGS),
+        );
+      void sendStartupLoadingState(progress);
+    });
+    await sendStartupLoadingState(LOADING_MILESTONES.TENSION);
   } catch (err) {
     log.error("Something went wrong with initial setup", err);
   }
@@ -224,176 +247,62 @@ Pebble.addEventListener("ready", async () => {
 
 Pebble.addEventListener("showConfiguration", async () => {
   try {
-    // Refresh possible categories from Kagi News API
     await refreshPossibleCategories();
-
     const claySettings = generateClaySettings(isDebugMode());
     log.debug("Generated Clay settings:", claySettings);
     localStorage.setItem("clay-settings", JSON.stringify(claySettings));
     Pebble.openURL(clay.generateUrl());
-  } catch (e) {
-    log.error("Failed to open Clay configuration", e);
-    log.error("Clay config error:", e);
+  } catch (err) {
+    log.error("Failed to open Clay configuration", err);
   }
 });
 
 // @ts-ignore
 Pebble.addEventListener("webviewclosed", async (event: any) => {
-  // Dump the entire cache if Clay is closed to avoid problems
-  await handlers.clearNetworkCache({ repopulateBatchId: true });
+  if (!event?.response) return;
+
+  // Read settings by messageKey NAME rather than by numeric AppMessage key.
+  // Clay expands a checkbox group into sequential numeric keys, so reading by
+  // offset silently corrupts the config as soon as two key bands overlap.
+  const raw: ClaySettings = clay.getSettings(event.response, false);
+  log.debug("Clay settings received:", JSON.stringify(raw));
+
+  const config = parseClayConfig(raw);
+  setDebugMode(Boolean(raw.DebugMode?.value));
+  // Persist before anything that can fail, so a network problem can never
+  // discard the changes the user just made.
+  saveAppConfig(config);
+  log.info("Configuration saved");
 
   try {
-    if (!event || !event.response) return;
+    await clearCachesOnSave(parseClearCacheFlags(raw));
+  } catch (err) {
+    log.warn("Failed to clear caches on save", err);
+  }
 
-    // TODO: Handling settings changes should be consolidated so it can be the same whether the app first starts or when config changes
-    const settings = clay.getSettings(event.response);
-    log.debug("Clay settings received:", JSON.stringify(settings));
-    // DebugMode is at key 10406 (after all category and section checkbox keys)
-    const debugModeKey = "10406";
-    const rawDebugValue = settings[debugModeKey];
-    const debugModeValue = rawDebugValue === true || rawDebugValue === 1;
-
-    setDebugMode(debugModeValue);
-
-    // Categories are at keys 10000-10199
-    const newSelected: boolean[] = availableCategories.map((_, idx) => {
-      const key = (10000 + idx).toString();
-      const val = settings[key];
-      return val === true || val === 1;
-    });
-    handlers.setSelectedCategoriesFromBoolean(newSelected);
-    const selectedNames = booleanToCategories(newSelected);
-
-    // Sections are at keys 10200-10299
-    const newSelectedSections: boolean[] = availableSections.map((_, idx) => {
-      const key = (10200 + idx).toString();
-      const val = settings[key];
-      return val === true || val === 1;
-    });
-    handlers.setSelectedSectionsFromBoolean(newSelectedSections);
-    const selectedSectionNames = booleanToSections(newSelectedSections);
-
-    // Additional Feeds are at keys 10300-10399
-    const newSelectedFeeds: boolean[] = additionalFeeds.map((_, idx) => {
-      const key = (10300 + idx).toString();
-      const val = settings[key];
-      return val === true || val === 1;
-    });
-    const selectedAdditionalFeeds = booleanToFeeds(newSelectedFeeds);
-    handlers.setAdditionalFeeds(...selectedAdditionalFeeds);
-
-    // Interface language is key 10400
-    const newInterfaceLanguage = settings["10400"] as string;
-
-    // Content language is key 10401
-    const newContentLanguage = settings["10401"] as string;
-    setServerLang(newContentLanguage);
-
-    // Max story count is key 10402
-    const newMaxStoryCount = settings["10402"] as number;
-    handlers.setMaxStoryCount(newMaxStoryCount);
-
-    // Text size is key 10403
-    const newTextSize = settings["10403"] as number;
-
-    // News refresh timeline pin setting is key 10404
-    const newsRefreshPinSetting = settings["10404"] as boolean;
-
-    // Show tension index setting is key 10405
-    const showTensionIndex = settings["10405"] as boolean;
-
-    // Save all settings as one atomic write
-    saveAppConfig({
-      selectedCategoryNames: selectedNames,
-      selectedSectionNames,
-      selectedAdditionalFeeds,
-      selectedInterfaceLanguage: newInterfaceLanguage,
-      selectedContentLanguage: newContentLanguage,
-      selectedMaxStoryCount: newMaxStoryCount,
-      selectedTextSize: newTextSize,
-      newsRefreshPinSetting,
-      isTensionIndexEnabled: showTensionIndex,
-    });
-
-    if (newsRefreshPinSetting) {
+  try {
+    if (config.newsRefreshPinSetting) {
       timeline.pushNewsRefreshPinToTimeline();
     }
-
-    // Do not update tension here, do it in the finally after categories are updated
-
-    // Clear full cache on save is key 10407
-    const clearFullCacheOnSave = settings["10407"] as boolean;
-    if (clearFullCacheOnSave) {
-      log.info("Clearing full cache as per user request");
-      await handlers.clearFullCache();
-    } else {
-      // Clear timeline pin memory on save is key 10408
-      const clearPinCacheOnSave = settings["10408"] as boolean;
-      if (clearPinCacheOnSave) {
-        log.info("Clearing timeline pin cache as per user request");
-        handlers.clearPinCache();
-      }
-      // Clear read stories memory on save is key 10409
-      const clearReadStoriesOnSave = settings["10409"] as boolean;
-      if (clearReadStoriesOnSave) {
-        log.info("Clearing read stories cache as per user request");
-        handlers.clearReadStoriesCache();
-      }
-      // Clear network cache on save is key 10410
-      // This is redundant because we always clear the network cache on Clay closing, but the certainty of it is useful to have
-      const clearNetworkCacheOnSave = settings["10410"] as boolean;
-      if (clearNetworkCacheOnSave) {
-        log.info("Clearing network cache as per user request");
-        await handlers.clearNetworkCache({ repopulateBatchId: true });
-      }
-    }
+    // Restart the watch so new fonts, text size and strings take effect, then
+    // replay the startup pipeline against the new settings.
+    await sendAppMessageWithSession({ type: "restart_app" });
+    await sendAppMessageWithSession({
+      type: "set_debug_mode",
+      isDebugMode: isDebugMode() ? 1 : 0,
+    });
+    await applyConfig(config);
+    await loadCategoriesAndNotifyWatch(config);
   } catch (err) {
     log.error(
-      "Error in webviewclosed handler",
+      "Failed to apply configuration",
       err instanceof Error ? err.message : String(err),
     );
-  } finally {
-    // TODO: The order of operations for restarting the app should be consolidated
-    sendAppMessageWithSession({ type: "restart_app" }).then(async () => {
-      const {
-        selectedInterfaceLanguage: interfaceLanguage,
-        selectedTextSize,
-        isTensionIndexEnabled,
-      } = getAppConfig();
-      const interfaceStrings = flattenInterfaceStrings(
-        filterInterfaceStringOptionals({
-          strings: getInterfaceStrings(interfaceLanguage),
-          sectionKeys: handlers.getSelectedSectionNames?.() ?? defaultSections,
-          categoryKeys:
-            handlers.getSelectedCategoryNames?.() ?? defaultCategories,
-          featureKeys: handlers.getAdditionalFeeds?.() ?? defaultCategories,
-          lang: interfaceLanguage,
-        }),
-      );
-      Promise.all([
-        sendAppMessageWithSession({
-          type: "send_interface_strings",
-          interfaceStrings: JSON.stringify(interfaceStrings),
-        }),
-        sendAppMessageWithSession({
-          type: "set_debug_mode",
-          isDebugMode: isDebugMode() ? 1 : 0,
-        }),
-        sendAppMessageWithSession({
-          type: "set_text_size",
-          textSize: selectedTextSize,
-        }),
-      ]).then(async () => {
-        await handlers.handleUpdateCategories();
-        await handlers.updateTensionIndex(isTensionIndexEnabled);
-        sendAppMessageWithSession({
-          type: "update_categories",
-          state: "success",
-        });
-      });
-    });
   }
 });
+
+const replyError = (type: string, error: string) =>
+  sendAppMessageWithSession({ type, state: "error", error });
 
 Pebble.addEventListener("appmessage", async (event) => {
   if (!event.payload || !("type" in event.payload)) return;
@@ -401,9 +310,7 @@ Pebble.addEventListener("appmessage", async (event) => {
 
   switch (payload.type) {
     case "get_category_names":
-      handlers.handleGetCategoryNames({
-        page: payload.page,
-      });
+      handlers.handleGetCategoryNames({ page: payload.page });
       break;
     case "get_story_titles":
       if ("categoryName" in payload) {
@@ -413,11 +320,10 @@ Pebble.addEventListener("appmessage", async (event) => {
           shortData: payload.shortData === 1,
         });
       } else {
-        sendAppMessageWithSession({
-          type: "get_story_titles",
-          state: "error",
-          error: "categoryName required for get_story_titles but none provided",
-        });
+        replyError(
+          "get_story_titles",
+          "categoryName required for get_story_titles but none provided",
+        );
       }
       break;
     case "get_short_summary":
@@ -427,11 +333,10 @@ Pebble.addEventListener("appmessage", async (event) => {
           storyTitle: payload.storyTitle,
         });
       } else {
-        sendAppMessageWithSession({
-          type: "get_short_summary",
-          state: "error",
-          error: "storyTitle required for get_short_summary but none provided",
-        });
+        replyError(
+          "get_short_summary",
+          "storyTitle required for get_short_summary but none provided",
+        );
       }
       break;
     case "get_available_details":
@@ -441,11 +346,10 @@ Pebble.addEventListener("appmessage", async (event) => {
           storyId: payload.storyId,
         });
       } else {
-        sendAppMessageWithSession({
-          type: "get_available_details",
-          state: "error",
-          error: "storyId required for get_available_details but none provided",
-        });
+        replyError(
+          "get_available_details",
+          "storyId required for get_available_details but none provided",
+        );
       }
       break;
     case "get_story_detail":
@@ -455,88 +359,76 @@ Pebble.addEventListener("appmessage", async (event) => {
           detailKey: payload.detailKey,
         });
       } else {
-        sendAppMessageWithSession({
-          type: "get_story_detail",
-          state: "error",
-          error: "detailType required for get_story_detail but none provided",
-        });
+        replyError(
+          "get_story_detail",
+          "detailType required for get_story_detail but none provided",
+        );
       }
       break;
     case "get_story_detail_sources":
-      if ("detailType" in payload) {
-        if (payload.detailType === StoryDetailEnum.Quote) {
-          handlers.handleGetArticleDomainForQuote();
-        } else {
-          handlers.handleGetArticleDomainsFromContent({
-            detailType: payload.detailType,
-            detailKey: payload.detailKey,
-          });
-        }
+      if (!("detailType" in payload)) {
+        replyError(
+          "get_story_detail_sources",
+          "detailType required for get_story_detail_sources but none provided",
+        );
+      } else if (payload.detailType === StoryDetailEnum.Quote) {
+        handlers.handleGetArticleDomainForQuote();
       } else {
-        sendAppMessageWithSession({
-          type: "get_story_detail_sources",
-          state: "error",
-          error:
-            "detailKey required for get_story_detail_sources but none provided",
+        handlers.handleGetArticleDomainsFromContent({
+          detailType: payload.detailType,
+          detailKey: payload.detailKey,
         });
       }
       break;
     case "get_qr_code_bitmap":
       log.debug("Received get_qr_code_bitmap request", payload);
-      if ("articleDomain" in payload) {
-        if (payload.articleDomain === "Type_Quote") {
-          handlers.handleUpdateQrCodeForQuote();
-        } else {
-          handlers.handleUpdateQrCode({ domain: payload.articleDomain });
-        }
+      if (!("articleDomain" in payload)) {
+        replyError(
+          "get_qr_code_bitmap",
+          "articleDomain required for get_qr_code_bitmap but none provided",
+        );
+      } else if (payload.articleDomain === "Type_Quote") {
+        handlers.handleUpdateQrCodeForQuote();
       } else {
-        sendAppMessageWithSession({
-          type: "get_qr_code_bitmap",
-          state: "error",
-          error:
-            "articleDomain required for get_qr_code_bitmap but none provided",
-        });
+        handlers.handleUpdateQrCode({ domain: payload.articleDomain });
       }
       break;
     case "get_next_qr_code_bitmap":
       if ("chunk" in payload) {
         handlers.handleGetQrCodeChunk({ chunk: payload.chunk });
       } else {
-        sendAppMessageWithSession({
-          type: "get_next_qr_code_bitmap",
-          state: "error",
-          error: "chunk required for get_next_qr_code_bitmap but none provided",
-        });
+        replyError(
+          "get_next_qr_code_bitmap",
+          "chunk required for get_next_qr_code_bitmap but none provided",
+        );
       }
       break;
     case "mark_story_read":
       if ("storyId" in payload) {
         handlers.handleAddReadStory(payload.storyId);
       } else {
-        sendAppMessageWithSession({
-          type: "mark_story_read",
-          state: "error",
-          error: "storyId required for mark_story_read but not provided",
-        });
+        replyError(
+          "mark_story_read",
+          "storyId required for mark_story_read but not provided",
+        );
       }
       break;
-    case "debug_log":
+    case "debug_log": {
       if (
         "logLevel" in payload &&
         "logTag" in payload &&
         "logMessage" in payload
       ) {
-        const level = payload.logLevel as number;
-        const tag = payload.logTag as string;
+        const cLog = createLogger(payload.logTag as string);
         const message = payload.logMessage as string;
-        const cLog = createLogger(tag);
-
+        const level = payload.logLevel as number;
         if (level === 0) cLog.debug(message);
         else if (level === 1) cLog.info(message);
         else if (level === 2) cLog.warn(message);
         else if (level === 3) cLog.error(message);
       }
       break;
+    }
     case "debug_notify":
       if ("logTag" in payload && "logMessage" in payload) {
         log.notify(payload.logTag as string, payload.logMessage as string);
