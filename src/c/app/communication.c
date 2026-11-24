@@ -252,7 +252,8 @@ void communication_init(void) {
     message_router_register("tension_index_update", handle_show_tension_index_message);
     message_router_register("set_emphasis_color", handle_set_emphasis_color_message);
     // Use the lesser of requested size and maximum allowed size.
-    // However sizes smaller than requested will probably break things {
+    // However sizes smaller than requested will probably break things
+    {
         uint32_t requested_inbox = APP_MESSAGE_INBOX_SIZE;
         uint32_t max_inbox = app_message_inbox_size_maximum();
         if (max_inbox < requested_inbox) {
