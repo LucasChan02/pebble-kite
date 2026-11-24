@@ -6,45 +6,28 @@
 #include "ui/categories.h"
 #include "ui/splash_screen.h"
 #include "ui/ui_config.h"
-
-static void init(void)
-{
+static void init(void) {
     ui_load_fonts();
     localization_init();
     communication_init();
     splash_screen_init();
     data_init();
-    data_manager_init();
-}
-
-static void deinit(void)
-{
-    if (splash_screen_is_showing())
-    {
-        splash_screen_deinit();
-    }
-    else
-    {
-        categories_ui_deinit();
-    }
+    data_manager_init(); }
+static void deinit(void) {
+    if (splash_screen_is_showing()) {
+        splash_screen_deinit(); } else {
+        categories_ui_deinit(); }
     communication_deinit();
     data_deinit();
     data_manager_deinit();
     localization_deinit();
-    ui_unload_fonts();
-}
-
-void app_restart(void)
-{
+    ui_unload_fonts(); }
+void app_restart(void) {
     window_stack_pop_all(false);
     deinit();
-    init();
-}
-
-int main(void)
-{
+    init(); }
+int main(void) {
     init();
     app_event_loop();
     deinit();
-    return 0;
-}
+    return 0; }

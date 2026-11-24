@@ -1,10 +1,5 @@
 #pragma once
-
-// String identifiers for all translatable strings in the app
-
-typedef enum
-{
-    // General
+typedef enum {
     STRING_LOADING,
     STRING_TENSION_INDEX,
     STRING_TENSION_INDEX_SHORT,
@@ -15,13 +10,11 @@ typedef enum
     STRING_TENSION_INDEX_LEVEL_4,
     STRING_TENSION_INDEX_LEVEL_5,
     STRING_TENSION_INDEX_EXPLANATION,
-    // Main menu
     STRING_FEEDS,
     STRING_NEWS,
     STRING_CATEGORIES,
     STRING_STORIES,
     STRING_AVAILABLE_DETAILS,
-    // Detail type display names
     STRING_HISTORICAL_BACKGROUND,
     STRING_HUMANITARIAN_IMPACT,
     STRING_DID_YOU_KNOW,
@@ -38,7 +31,6 @@ typedef enum
     STRING_SCIENTIFIC_SIGNIFICANCE,
     STRING_PERFORMANCE_STATISTICS,
     STRING_SOURCES,
-    // Generic category slots (up to 20 categories)
     STRING_CATEGORY_A,
     STRING_CATEGORY_B,
     STRING_CATEGORY_C,
