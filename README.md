@@ -32,6 +32,11 @@ pebble build
 Versions are pinned in `.tool-versions` and `.pebble-versions`. The Pebble manifest accepts
 `MAJOR[.MINOR[.PATCH]]` only, so a version cannot carry a suffix.
 
+The media files live in `assets/`, but the `resources/` directory must still exist: the
+`resources.media.file` paths are resolved relative to it, and the platform-tagged splash
+variants are found by scanning the same directory. That is why `resources/.gitkeep` is
+committed.
+
 ## Licence
 
 GPLv3, see `LICENSE`; asset and trademark terms are in `LICENSE-NOTICE`. This is a modified
