@@ -41,7 +41,7 @@ export function buildClayConfig(categories: string[] = []) {
           label: "Emphasis Colour",
           description:
             "Colour of the selected row in lists. Pick something that stands out against black text on a white page; black-and-white watches ignore this.",
-          defaultValue: 0xffaa55,
+          defaultValue: 0x00e5ff,
         },
         {
           type: "checkboxgroup",

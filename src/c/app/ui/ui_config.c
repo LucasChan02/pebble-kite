@@ -11,7 +11,7 @@ GFont ui_font_splash_progress = NULL;
 // Emphasis colour defaults to the theme accent and is replaced at runtime when
 // the phone sends the value chosen in its colour picker.
 #ifdef PBL_COLOR
-static GColor s_emphasis_color = GColorRajah;
+static GColor s_emphasis_color = GColorCyan;
 #else
 static GColor s_emphasis_color = GColorBlack;
 #endif

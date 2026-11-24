@@ -39,8 +39,8 @@ export interface AppConfig {
   emphasisColor: number;
 }
 
-/** Default emphasis colour: #FFAA55, the same Rajah the watch falls back to. */
-export const DEFAULT_EMPHASIS_COLOR = 0xffaa55;
+/** Default emphasis colour: #00E5FF, matching the icon accent. */
+export const DEFAULT_EMPHASIS_COLOR = 0x00e5ff;
 
 const CONFIG_DEFAULTS: AppConfig = {
   selectedAdditionalFeeds: [],
