@@ -101,13 +101,13 @@
     "resources": {
       "media": [
         {
-          "file": "icons/menu_icon.png",
+          "file": "../assets/menu_icon.png",
           "menuIcon": true,
           "name": "IMAGE_MENU_ICON",
           "type": "bitmap"
         },
         {
-          "file": "icons/splash_screen.png",
+          "file": "../assets/splash_screen.png",
           "name": "IMAGE_SPLASH_SCREEN",
           "type": "bitmap"
         }
