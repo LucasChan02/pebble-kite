@@ -36,4 +36,4 @@ Versions are pinned in `.tool-versions` and `.pebble-versions`. The Pebble manif
 
 GPLv3, see `LICENSE`; asset and trademark terms are in `LICENSE-NOTICE`. This is a modified
 version of pebble-kite under GPLv3 §5(a); original authorship and copyright remain with the
-origin author.
+origin author. This revision is maintained by lsch02.

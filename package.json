@@ -1,10 +1,12 @@
 {
   "name": "pebble-kite-rev",
-  "author": "James Downs",
+  "author": "lsch02",
   "version": "1.27.3",
+  "description": "Unofficial Pebble front end for Kagi News, revised",
   "keywords": [
     "pebble-app"
   ],
+  "license": "GPL-3.0",
   "private": true,
   "scripts": {
     "prebuild": "npm run generate-message-keys",
