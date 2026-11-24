@@ -21,6 +21,10 @@ Lists and the reading view are a plain white page with black text, the menu icon
 higher-contrast palette, and the emphasis colour is picked on the phone. The rest of the
 layout follows the origin project.
 
+The source layout is compacted to about 30% fewer lines than upstream. Only line breaks,
+indentation and redundant header comments were changed, so the C token stream is identical
+and behaviour is unchanged.
+
 ## Building
 
 ```sh
