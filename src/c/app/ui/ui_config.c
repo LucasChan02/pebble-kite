@@ -10,6 +10,41 @@ GFont ui_font_menu_title = NULL;
 GFont ui_font_status_bar = NULL;
 GFont ui_font_splash_progress = NULL;
 
+// Emphasis colour defaults to the theme accent and is replaced at runtime when
+// the phone sends the value chosen in its colour picker.
+#ifdef PBL_COLOR
+static GColor s_emphasis_color = GColorRajah;
+#else
+static GColor s_emphasis_color = GColorBlack;
+#endif
+
+void ui_set_emphasis_color(GColor color)
+{
+#ifndef PBL_COLOR
+    // Black-and-white watches have nothing to choose between.
+    color = GColorBlack;
+#endif
+    s_emphasis_color = color;
+}
+
+GColor ui_get_emphasis_color(void)
+{
+    return s_emphasis_color;
+}
+
+GColor ui_get_emphasis_text_color(void)
+{
+#ifdef PBL_COLOR
+    // Perceived lightness of a 2-bit-per-channel colour, 0 to 3. Anything above
+    // the midpoint needs dark text on top of it.
+    const uint8_t lightness =
+        (uint8_t)((s_emphasis_color.r * 3 + s_emphasis_color.g * 6 + s_emphasis_color.b) / 10);
+    return lightness > 1 ? GColorBlack : GColorWhite;
+#else
+    return GColorWhite;
+#endif
+}
+
 // This was built to handle custom fonts but is just using system fonts for now
 void ui_load_fonts(void)
 {

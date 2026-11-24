@@ -35,7 +35,12 @@ export interface AppConfig {
   selectedSectionNames: AvailableSection[];
   selectedCategoryNames: AvailableCategory[];
   isTensionIndexEnabled: boolean;
+  /** 24-bit RGB used for highlighted rows. Matches GColorRajah by default. */
+  emphasisColor: number;
 }
+
+/** Default emphasis colour: #FFAA55, the same Rajah the watch falls back to. */
+export const DEFAULT_EMPHASIS_COLOR = 0xffaa55;
 
 const CONFIG_DEFAULTS: AppConfig = {
   selectedAdditionalFeeds: [],
@@ -47,6 +52,7 @@ const CONFIG_DEFAULTS: AppConfig = {
   selectedSectionNames: defaultSections,
   selectedCategoryNames: defaultCategories,
   isTensionIndexEnabled: true,
+  emphasisColor: DEFAULT_EMPHASIS_COLOR,
 };
 
 const CONFIG_KEY = "kagi_news_config";
@@ -140,6 +146,12 @@ export const parseClayConfig = (settings: ClaySettings): AppConfig => ({
     defaultMaxStories,
   ),
   isTensionIndexEnabled: Boolean(readValue(settings, "ShowTensionIndex", true)),
+  emphasisColor: toBoundedInt(
+    readValue(settings, "emphasisColor", DEFAULT_EMPHASIS_COLOR),
+    0,
+    0xffffff,
+    DEFAULT_EMPHASIS_COLOR,
+  ),
 });
 
 /** The "Clear Cache On Save" options that were ticked. */
@@ -234,5 +246,6 @@ export const generateClaySettings = (
     ClearCacheOnSave: CLEAR_CACHE_OPTIONS.map(() => false),
     DebugMode: debugMode,
     ShowTensionIndex: config.isTensionIndexEnabled,
+    emphasisColor: config.emphasisColor,
   };
 };

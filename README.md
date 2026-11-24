@@ -17,7 +17,9 @@ the list, including `World`, permanently selected.
 
 Configuration is now read by key name rather than by offset, the key bands are re-spaced
 with a build-time overlap guard, and saving no longer breaks when the network is down.
-Appearance follows the origin project; only the menu icon palette differs.
+Lists and the reading view are a plain white page with black text, the menu icon uses a
+higher-contrast palette, and the emphasis colour is picked on the phone. The rest of the
+layout follows the origin project.
 
 ## Building
 

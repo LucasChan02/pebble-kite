@@ -425,8 +425,9 @@ Window *s_menu_handler_create_window(MenuConfig config, bool never_multiline)
                                                   .draw_header = draw_header,
                                                   .get_header_height = get_header_height});
 
-    menu_layer_set_normal_colors(menu_data->menu_layer, GColorWhite, UI_COLOR_TEXT_PRIMARY);
-    menu_layer_set_highlight_colors(menu_data->menu_layer, UI_COLOR_HIGHLIGHT, UI_COLOR_TEXT_ON_DARK);
+    menu_layer_set_normal_colors(menu_data->menu_layer, UI_COLOR_BACKGROUND, UI_COLOR_TEXT_PRIMARY);
+    menu_layer_set_highlight_colors(menu_data->menu_layer, ui_get_emphasis_color(),
+                                    ui_get_emphasis_text_color());
 
     window_set_click_config_provider_with_context(window, click_config_provider, menu_data);
     layer_add_child(window_layer, menu_layer_get_layer(menu_data->menu_layer));

@@ -38,6 +38,20 @@ void ui_unload_fonts(void);
  */
 void ui_reload_fonts(void);
 
+/**
+ * Set the emphasis colour used for highlighted rows
+ * @param color: the colour chosen on the phone's colour picker
+ */
+void ui_set_emphasis_color(GColor color);
+/**
+ * Get the emphasis colour
+ */
+GColor ui_get_emphasis_color(void);
+/**
+ * Get a text colour that stays readable on the emphasis colour
+ */
+GColor ui_get_emphasis_text_color(void);
+
 typedef struct
 {
     GRect background_frame;
@@ -48,20 +62,17 @@ typedef struct
 } UISplashProgressLayout;
 
 // Colors
+//
+// The emphasis colour is chosen by the user on the phone's colour picker, so it
+// is a runtime value rather than a macro. Everything else is fixed.
 #ifdef PBL_COLOR
-#define UI_COLOR_HIGHLIGHT GColorRajah
-#define UI_COLOR_TEXT_ON_DARK GColorBlack
-#ifdef PBL_ROUND
 #define UI_COLOR_MENU_HEADER_BACKGROUND GColorWhite
 #else
-#define UI_COLOR_MENU_HEADER_BACKGROUND GColorWhite
-#endif
-#else
-#define UI_COLOR_HIGHLIGHT GColorBlack
-#define UI_COLOR_TEXT_ON_DARK GColorWhite
 #define UI_COLOR_MENU_HEADER_BACKGROUND GColorWhite
 #endif
 
+// Lists and the reading view are always a plain white page with black text.
+#define UI_COLOR_BACKGROUND GColorWhite
 #define UI_COLOR_TEXT_PRIMARY GColorBlack
 #define UI_COLOR_MENU_HEADER_TEXT GColorBlack
 

@@ -48,6 +48,7 @@ const PROTOCOL_KEYS = [
   "detailHasSources",
   "detailKey",
   "detailType",
+  "emphasisColor",
   "error",
   "interfaceStrings",
   "isDebugMode",

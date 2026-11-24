@@ -111,8 +111,12 @@ void handle_get_category_names_message(DictionaryIterator *iter)
         {
             send_get_category_names(next_page_tuple->value->int8);
         }
-        else if (categories_loaded() && splash_screen_is_showing())
+        else if (splash_screen_is_showing())
         {
+            // The last page has arrived, so the request is finished. Dismiss the
+            // splash even when no categories came back: a day with no stories in
+            // any selected category, or a phone that cannot reach Kagi, would
+            // otherwise leave the watch stuck on the splash screen for ever.
             splash_screen_set_loading_progress(100, 100);
             splash_screen_dismiss();
         }
@@ -542,4 +546,29 @@ void handle_show_tension_index_message(DictionaryIterator *iter)
 
         set_tension_reason(tension_reason);
     }
+}
+
+void handle_set_emphasis_color_message(DictionaryIterator *iter)
+{
+    if (check_session_id(iter) == false)
+    {
+        return;
+    }
+
+    Tuple *color_tuple = dict_find(iter, MESSAGE_KEY_emphasisColor);
+    if (!color_tuple)
+    {
+        ERROR_LOG("KNCMessageHandling", "Emphasis colour message missing colour");
+        return;
+    }
+
+#ifdef PBL_COLOR
+    const int32_t rgb = color_tuple->value->int32;
+    ui_set_emphasis_color(
+        GColorFromRGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF));
+    INFO_LOG("KNCMessageHandling", "Emphasis colour set from #%06x", (int)rgb);
+#else
+    // Nothing to choose on a black-and-white watch, but consume the message.
+    ui_set_emphasis_color(GColorBlack);
+#endif
 }

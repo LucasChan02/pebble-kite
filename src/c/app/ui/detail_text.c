@@ -214,6 +214,14 @@ static void detail_window_load(Window *window)
     text_layer_set_overflow_mode(ctx->text_layer, GTextOverflowModeWordWrap);
     text_layer_set_text_alignment(ctx->text_layer, UI_DETAIL_TEXT_ALIGNMENT);
 
+    // The reading view is a plain white page with black text so long passages
+    // stay legible in every lighting condition.
+    window_set_background_color(window, UI_COLOR_BACKGROUND);
+    text_layer_set_background_color(ctx->title_layer, UI_COLOR_BACKGROUND);
+    text_layer_set_text_color(ctx->title_layer, UI_COLOR_TEXT_PRIMARY);
+    text_layer_set_background_color(ctx->text_layer, UI_COLOR_BACKGROUND);
+    text_layer_set_text_color(ctx->text_layer, UI_COLOR_TEXT_PRIMARY);
+
     scroll_layer_add_child(ctx->scroll_layer, text_layer_get_layer(ctx->title_layer));
     scroll_layer_add_child(ctx->scroll_layer, text_layer_get_layer(ctx->text_layer));
     scroll_layer_set_content_size(ctx->scroll_layer, GSize(bounds.size.w, 60));

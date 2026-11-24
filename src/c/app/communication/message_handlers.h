@@ -80,3 +80,8 @@ void handle_set_text_size_message(DictionaryIterator *iter);
  * @param iter Dictionary iterator containing the message
  */
 void handle_show_tension_index_message(DictionaryIterator *iter);
+/**
+ * Handler for "set_emphasis_color" message from phone
+ * @param iter Dictionary iterator containing the message
+ */
+void handle_set_emphasis_color_message(DictionaryIterator *iter);

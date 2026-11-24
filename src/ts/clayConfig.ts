@@ -36,6 +36,14 @@ export function buildClayConfig(categories: string[] = []) {
           defaultValue: true,
         },
         {
+          type: "color",
+          messageKey: "emphasisColor",
+          label: "Emphasis Colour",
+          description:
+            "Colour of the selected row in lists. Pick something that stands out against black text on a white page; black-and-white watches ignore this.",
+          defaultValue: 0xffaa55,
+        },
+        {
           type: "checkboxgroup",
           messageKey: "AdditionalFeeds",
           label: "Additional Feeds",

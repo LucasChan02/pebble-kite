@@ -74,10 +74,33 @@ const sendStartupLoadingState = (() => {
   };
 })();
 
-// Mutable Clay instance that is updated based on runtime fetches of Kagi News data
-let clay: ClayInstance = new Clay(buildClayConfig(defaultCategories), null, {
-  autoHandleEvents: false,
-});
+// Mutable Clay instance that is updated based on runtime fetches of Kagi News data.
+// Clay only fills its meta from the "ready" event, and these instances are built
+// after that has already fired, so the meta is populated here. The config page
+// reads the watch platform from it to decide which palette to offer for the
+// emphasis colour, and would otherwise only ever show black and white.
+const createClay = (categories: string[]): ClayInstance => {
+  const instance = new Clay(buildClayConfig(categories), null, {
+    autoHandleEvents: false,
+  });
+  const pebble = Pebble as any;
+  instance.meta = {
+    activeWatchInfo:
+      typeof pebble.getActiveWatchInfo === "function"
+        ? pebble.getActiveWatchInfo()
+        : null,
+    accountToken:
+      typeof pebble.getAccountToken === "function"
+        ? pebble.getAccountToken()
+        : "",
+    watchToken:
+      typeof pebble.getWatchToken === "function" ? pebble.getWatchToken() : "",
+    userData: {},
+  };
+  return instance;
+};
+
+let clay: ClayInstance = createClay(defaultCategories);
 
 const refreshPossibleCategories = async (): Promise<void> => {
   const result = await possibleCategoriesRequest();
@@ -92,9 +115,7 @@ const refreshPossibleCategories = async (): Promise<void> => {
       "Failed to fetch categories from metadata API, using fallback list",
     );
   }
-  clay = new Clay(buildClayConfig(availableCategories), null, {
-    autoHandleEvents: false,
-  });
+  clay = createClay(availableCategories);
 };
 
 const sendInterfaceStrings = async (
@@ -127,6 +148,10 @@ const applyConfig = async (config: AppConfig): Promise<void> => {
   await sendAppMessageWithSession({
     type: "set_text_size",
     textSize: config.selectedTextSize,
+  });
+  await sendAppMessageWithSession({
+    type: "set_emphasis_color",
+    emphasisColor: config.emphasisColor,
   });
   await sendInterfaceStrings(config, config.selectedCategoryNames);
 };
@@ -164,6 +189,16 @@ const loadCategoriesAndNotifyWatch = async (
     .updateTensionIndex(config.isTensionIndexEnabled)
     .catch((err) => log.warn("Failed to update tension index", err));
 
+  await notifyWatchDataReady();
+};
+
+// The watch holds the splash screen until it is told data is ready. Sending
+// this twice would make it clear and re-request its categories, so it fires at
+// most once per session, and the callers reset the flag when a session starts.
+let watchNotified = false;
+const notifyWatchDataReady = async (): Promise<void> => {
+  if (watchNotified) return;
+  watchNotified = true;
   log.info("Notifying watch that data is ready");
   await sendAppMessageWithSession({
     type: "update_categories",
@@ -189,6 +224,7 @@ const clearCachesOnSave = async (
 };
 
 Pebble.addEventListener("ready", async () => {
+  watchNotified = false;
   setSessionId(Date.now().toString());
   initDebugMode();
   log.info("PebbleKit JS ready");
@@ -242,6 +278,13 @@ Pebble.addEventListener("ready", async () => {
     await sendStartupLoadingState(LOADING_MILESTONES.TENSION);
   } catch (err) {
     log.error("Something went wrong with initial setup", err);
+  } finally {
+    // Whatever happened above, the watch must not be left waiting on the splash
+    // screen. If the API or the network is unavailable it will simply end up
+    // with no categories, which is better than hanging.
+    await notifyWatchDataReady().catch((err) =>
+      log.warn("Failed to notify the watch that data is ready", err),
+    );
   }
 });
 
@@ -286,6 +329,7 @@ Pebble.addEventListener("webviewclosed", async (event: any) => {
     }
     // Restart the watch so new fonts, text size and strings take effect, then
     // replay the startup pipeline against the new settings.
+    watchNotified = false;
     await sendAppMessageWithSession({ type: "restart_app" });
     await sendAppMessageWithSession({
       type: "set_debug_mode",
@@ -298,6 +342,9 @@ Pebble.addEventListener("webviewclosed", async (event: any) => {
       "Failed to apply configuration",
       err instanceof Error ? err.message : String(err),
     );
+    // The watch restarted, so it is on the splash screen again. Always hand it
+    // data-ready, otherwise a failure here leaves it there for good.
+    await notifyWatchDataReady().catch(() => {});
   }
 });
 
